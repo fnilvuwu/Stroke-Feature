@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Improved Duolingo Style Tracing</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #f3f4f6;
+            padding: 24px;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            width: 430px;
+            max-width: 100%;
+            background: white;
+            border-radius: 28px;
+            padding: 24px;
+            box-shadow:
+                0 15px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin: 0;
+            text-align: center;
+            font-size: 32px;
+            color: #111827;
+        }
+
+        .description {
+            margin-top: 12px;
+            text-align: center;
+            color: #6b7280;
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            width: 360px;
+            height: 360px;
+            margin: 28px auto 0;
+            border-radius: 24px;
+            overflow: hidden;
+            background: white;
+            border: 2px solid #e5e7eb;
+        }
+
+        svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #drawLayer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            touch-action: none;
+            cursor: pointer;
+        }
+
+        /*
+    ========================================
+    GUIDE PATH
+    ========================================
+    */
+
+        .guide-path {
+            fill: none;
+            stroke: #d1d5db;
+            stroke-width: 24;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            opacity: 0.18;
+            transition: all 0.2s ease;
+        }
+
+        .active-guide {
+            stroke: #60a5fa;
+            opacity: 0.35;
+        }
+
+        .completed-guide {
+            stroke: #111827;
+            opacity: 1;
+        }
+
+        /*
+    ========================================
+    COMPLETED STROKE
+    ========================================
+    */
+
+        .trace-line {
+            fill: none;
+            stroke: #111827;
+            stroke-width: 24;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /*
+    ========================================
+    FIXED BLUE ARROW
+    ========================================
+    */
+
+        #dragHandle {
+            pointer-events: none;
+        }
+
+        .handle-circle {
+            fill: #3b82f6;
+
+            filter:
+                drop-shadow(0 4px 10px rgba(59, 130, 246, 0.35));
+        }
+
+        .handle-arrow {
+            stroke: white;
+            stroke-width: 4;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /*
+    ========================================
+    DOTS
+    ========================================
+    */
+
+        .start-dot {
+            fill: #111827;
+        }
+
+        .mid-dot {
+            fill: #ffffff;
+            opacity: 0.7;
+        }
+
+        .end-dot {
+            fill: #9ca3af;
+        }
+
+        /*
+    ========================================
+    BUTTON
+    ========================================
+    */
+
+        .controls {
+            margin-top: 22px;
+        }
+
+        button {
+            width: 100%;
+            border: none;
+            background: #111827;
+            color: white;
+            padding: 15px;
+            border-radius: 16px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        /*
+    ========================================
+    STATUS
+    ========================================
+    */
+
+        .status {
+            margin-top: 18px;
+            text-align: center;
+            font-weight: 700;
+            min-height: 24px;
+        }
+
+        .warning {
+            color: #dc2626;
+        }
+
+        .success {
+            color: #111827;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>Stroke Tracing</h1>
+
+        <div class="description">
+            Improved anti-scribble tracing
+        </div>
+
+        <div class="canvas-wrapper">
+
+            <svg viewBox="0 0 360 360">
+
+                <!-- GUIDE -->
+                <path id="guide1" class="guide-path active-guide" d="M80 180 Q180 80 280 180" />
+
+                <!-- GUIDE 2 -->
+                <path id="guide2" class="guide-path" d="M180 180 L180 280" />
+
+                <!-- COMPLETED GUIDE -->
+                <path id="progressPath" class="trace-line" />
+
+                <!-- POINTS -->
+                <g id="pointLayer"></g>
+
+                <!-- FIXED BLUE ARROW -->
+                <g id="dragHandle">
+
+                    <circle r="18" class="handle-circle" />
+
+                    <path class="handle-arrow" d="M-4 -6 L5 0 L-4 6" />
+
+                </g>
+
+            </svg>
+
+            <canvas id="drawLayer" width="360" height="360"></canvas>
+
+        </div>
+
+        <div class="controls">
+
+            <button id="resetBtn">
+                Reset
+            </button>
+
+        </div>
+
+        <div class="status" id="status">
+            Follow the blue arrow
+        </div>
+
+    </div>
+
+    <script>
+
+        //
+        // ========================================
+        // CONFIG
+        // ========================================
+        //
+
+        const MAX_DISTANCE = 42;
+
+        const COMPLETE_PROGRESS = 0.92;
+
+        const START_RADIUS = 40;
+
+        const END_RADIUS = 48;
+
+        const SAMPLE_COUNT = 260;
+
+        //
+        // NEW IMPORTANT RULES
+        //
+
+        const MAX_ALLOWED_BACKTRACK = 0.12;
+
+        const MIN_FORWARD_MOVEMENT = 0.002;
+
+        const MAX_SCRIBBLE_POINTS = 320;
+
+        const MAX_DIRECTION_CHANGES = 22;
+
+        //
+        // ========================================
+        // STROKES
+        // ========================================
+        //
+
+        const strokes = [
+            {
+                pathId: 'guide1',
+                start: {
+                    x: 80,
+                    y: 180
+                }
+            },
+            {
+                pathId: 'guide2',
+                start: {
+                    x: 180,
+                    y: 180
+                }
+            }
+        ];
+
+        //
+        // ========================================
+        // ELEMENTS
+        // ========================================
+        //
+
+        const canvas =
+            document.getElementById(
+                'drawLayer'
+            );
+
+        const ctx =
+            canvas.getContext('2d');
+
+        const progressPath =
+            document.getElementById(
+                'progressPath'
+            );
+
+        const dragHandle =
+            document.getElementById(
+                'dragHandle'
+            );
+
+        const pointLayer =
+            document.getElementById(
+                'pointLayer'
+            );
+
+        const statusText =
+            document.getElementById(
+                'status'
+            );
+
+        const resetBtn =
+            document.getElementById(
+                'resetBtn'
+            );
+
+        //
+        // ========================================
+        // STATE
+        // ========================================
+        //
+
+        let drawing = false;
+
+        let currentProgress = 0;
+
+        let maxProgress = 0;
+
+        let userPoints = [];
+
+        let strokeCompleted = false;
+
+        //
+        // NEW ANTI-SCRIBBLE STATE
+        //
+
+        let directionChanges = 0;
+
+        let lastDelta = 0;
+
+        let invalidMovementCount = 0;
+
+        let currentStrokeIndex = 0;
+
+        //
+        // ========================================
+        // HELPERS
+        // ========================================
+        //
+
+        function getCurrentPath() {
+            return document.getElementById(
+                strokes[currentStrokeIndex].pathId
+            );
+        }
+
+        function distance(a, b) {
+
+            return Math.hypot(
+                a.x - b.x,
+                a.y - b.y
+            );
+        }
+
+        function getPointerPosition(event) {
+
+            const rect =
+                canvas.getBoundingClientRect();
+
+            return {
+
+                x:
+                    event.clientX - rect.left,
+
+                y:
+                    event.clientY - rect.top
+            };
+        }
+
+        //
+        // ========================================
+        // PROJECT TO PATH
+        // ========================================
+        //
+
+        function projectPointToPath(
+            path,
+            point
+        ) {
+
+            const totalLength =
+                path.getTotalLength();
+
+            let closestDistance =
+                Infinity;
+
+            let closestLength = 0;
+
+            for (
+                let i = 0;
+                i <= SAMPLE_COUNT;
+                i++
+            ) {
+
+                const length =
+                    (i / SAMPLE_COUNT) *
+                    totalLength;
+
+                const p =
+                    path.getPointAtLength(
+                        length
+                    );
+
+                const d =
+                    Math.hypot(
+                        point.x - p.x,
+                        point.y - p.y
+                    );
+
+                if (d < closestDistance) {
+
+                    closestDistance = d;
+
+                    closestLength = length;
+                }
+            }
+
+            return {
+
+                distance:
+                    closestDistance,
+
+                progress:
+                    closestLength /
+                    totalLength
+            };
+        }
+
+        //
+        // ========================================
+        // DRAW FREEHAND
+        // ========================================
+        //
+
+        function drawFreehandStroke() {
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            if (userPoints.length < 2) {
+                return;
+            }
+
+            ctx.strokeStyle =
+                '#111827';
+
+            ctx.lineWidth = 24;
+
+            ctx.lineCap = 'round';
+
+            ctx.lineJoin = 'round';
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                userPoints[0].x,
+                userPoints[0].y
+            );
+
+            for (
+                let i = 1;
+                i < userPoints.length - 1;
+                i++
+            ) {
+
+                const current =
+                    userPoints[i];
+
+                const next =
+                    userPoints[i + 1];
+
+                const midX =
+                    (current.x + next.x) / 2;
+
+                const midY =
+                    (current.y + next.y) / 2;
+
+                ctx.quadraticCurveTo(
+                    current.x,
+                    current.y,
+                    midX,
+                    midY
+                );
+            }
+
+            const last =
+                userPoints[
+                userPoints.length - 1
+                ];
+
+            ctx.lineTo(
+                last.x,
+                last.y
+            );
+
+            ctx.stroke();
+        }
+
+        //
+        // ========================================
+        // UPDATE VISUAL
+        // ========================================
+        //
+
+        function updateProgressVisual() {
+
+            const path =
+                getCurrentPath()
+
+            //
+            // Only fill on completion
+            //
+
+            if (strokeCompleted) {
+
+                const totalLength =
+                    path.getTotalLength();
+
+                progressPath.setAttribute(
+                    'd',
+                    path.getAttribute('d')
+                );
+
+                progressPath.style.strokeDasharray =
+                    totalLength;
+
+                progressPath.style.strokeDashoffset =
+                    0;
+
+            } else {
+
+                progressPath.setAttribute(
+                    'd',
+                    ''
+                );
+            }
+
+            //
+            // Fixed arrow
+            //
+
+            const startPoint =
+                path.getPointAtLength(0);
+
+            const nextPoint =
+                path.getPointAtLength(2);
+
+            const angle =
+                Math.atan2(
+                    nextPoint.y - startPoint.y,
+                    nextPoint.x - startPoint.x
+                ) * (180 / Math.PI);
+
+            dragHandle.setAttribute(
+                'transform',
+                `
+      translate(${startPoint.x}, ${startPoint.y})
+      rotate(${angle})
+    `
+            );
+        }
+
+        //
+        // ========================================
+        // POINTS
+        // ========================================
+        //
+
+        //
+        // ========================================
+        // POINTS
+        // ========================================
+        //
+
+        function renderPoints() {
+
+            pointLayer.innerHTML = '';
+
+            const path =
+                getCurrentPath()
+
+            const totalLength =
+                path.getTotalLength();
+
+            //
+            // CREATE MULTIPLE POINTS
+            //
+
+            const numberOfPoints = 10;
+
+            for (
+                let i = 0;
+                i <= numberOfPoints;
+                i++
+            ) {
+
+                const point =
+                    path.getPointAtLength(
+                        (totalLength / numberOfPoints) * i
+                    );
+
+                const dot =
+                    document.createElementNS(
+                        'http://www.w3.org/2000/svg',
+                        'circle'
+                    );
+
+                dot.setAttribute(
+                    'cx',
+                    point.x
+                );
+
+                dot.setAttribute(
+                    'cy',
+                    point.y
+                );
+
+                dot.setAttribute(
+                    'r',
+                    i === 0 ? 10 : (
+                        i === numberOfPoints ? 7 : 4
+                    )
+                );
+
+                dot.setAttribute(
+                    'class',
+                    i === 0
+                        ? 'start-dot'
+                        : (
+                            i === numberOfPoints
+                                ? 'end-dot'
+                                : 'mid-dot'
+                        )
+                );
+
+                pointLayer.appendChild(
+                    dot
+                );
+            }
+        }
+        // ========================================
+        // RESET
+        // ========================================
+        //
+
+        function resetCurrentStroke() {
+
+            drawing = false;
+
+            currentProgress = 0;
+
+            maxProgress = 0;
+
+            userPoints = [];
+
+            strokeCompleted = false;
+
+            directionChanges = 0;
+
+            lastDelta = 0;
+
+            invalidMovementCount = 0;
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            progressPath.setAttribute(
+                'd',
+                ''
+            );
+
+            updateProgressVisual();
+
+            statusText.innerHTML =
+                'Try again';
+
+            statusText.className =
+                'status warning';
+        }
+
+        //
+        // ========================================
+        // INIT
+        // ========================================
+        //
+
+        renderPoints();
+
+        updateProgressVisual();
+
+        //
+        // ========================================
+        // POINTER DOWN
+        // ========================================
+        //
+
+        canvas.addEventListener(
+            'pointerdown',
+            (event) => {
+
+                const pointer =
+                    getPointerPosition(event);
+
+                const start =
+                    strokes[currentStrokeIndex].start;
+
+                if (
+                    distance(pointer, start)
+                    > START_RADIUS
+                ) {
+
+                    statusText.innerHTML =
+                        'Start from black dot';
+
+                    statusText.className =
+                        'status warning';
+
+                    return;
+                }
+
+                resetCurrentStroke();
+
+                drawing = true;
+
+                userPoints.push(pointer);
+
+                drawFreehandStroke();
+
+                statusText.innerHTML =
+                    'Tracing...';
+
+                statusText.className =
+                    'status';
+            }
+        );
+
+        //
+        // ========================================
+        // POINTER MOVE
+        // ========================================
+        //
+
+        canvas.addEventListener(
+            'pointermove',
+            (event) => {
+
+                if (!drawing) {
+                    return;
+                }
+
+                //
+                // Too much scribbling
+                //
+
+                if (
+                    userPoints.length >
+                    MAX_SCRIBBLE_POINTS
+                ) {
+
+                    resetCurrentStroke();
+
+                    return;
+                }
+
+                const pointer =
+                    getPointerPosition(event);
+
+                userPoints.push(pointer);
+
+                drawFreehandStroke();
+
+                const path =
+                    getCurrentPath()
+
+                const projection =
+                    projectPointToPath(
+                        path,
+                        pointer
+                    );
+
+                //
+                // Too far from path
+                //
+
+                if (
+                    projection.distance >
+                    MAX_DISTANCE
+                ) {
+
+                    invalidMovementCount++;
+
+                    return;
+                }
+
+                const delta =
+                    projection.progress -
+                    currentProgress;
+
+                //
+                // Detect aggressive backtracking
+                //
+
+                if (
+                    delta <
+                    -MAX_ALLOWED_BACKTRACK
+                ) {
+
+                    invalidMovementCount++;
+
+                    return;
+                }
+
+                //
+                // Detect scribble direction spam
+                //
+
+                if (
+                    Math.sign(delta) !==
+                    Math.sign(lastDelta)
+                ) {
+
+                    directionChanges++;
+                }
+
+                lastDelta = delta;
+
+                //
+                // Too much zig-zag
+                //
+
+                if (
+                    directionChanges >
+                    MAX_DIRECTION_CHANGES
+                ) {
+
+                    resetCurrentStroke();
+
+                    return;
+                }
+
+                //
+                // Only meaningful forward movement
+                //
+
+                if (
+                    delta >
+                    MIN_FORWARD_MOVEMENT
+                ) {
+
+                    currentProgress =
+                        projection.progress;
+
+                    maxProgress =
+                        Math.max(
+                            maxProgress,
+                            currentProgress
+                        );
+                }
+            }
+        );
+
+        //
+        // ========================================
+        // COMPLETE
+        // ========================================
+        //
+
+        function completeStroke() {
+
+            strokeCompleted = true;
+
+            updateProgressVisual();
+
+            userPoints = [];
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            const guide = getCurrentPath();
+
+            guide.classList.remove(
+                'active-guide'
+            );
+
+            guide.classList.add(
+                'completed-guide'
+            );
+
+            //
+            // MOVE TO NEXT STROKE
+            //
+
+            currentStrokeIndex++;
+
+            //
+            // MORE STROKES LEFT
+            //
+
+            if (currentStrokeIndex < strokes.length) {
+
+                const nextGuide =
+                    getCurrentPath();
+
+                nextGuide.classList.add(
+                    'active-guide'
+                );
+
+                renderPoints();
+
+                resetCurrentStroke();
+
+                statusText.innerHTML =
+                    'Stroke complete! Next stroke';
+
+                statusText.className =
+                    'status success';
+
+                return;
+            }
+
+            //
+            // ALL DONE
+            //
+
+            dragHandle.style.display =
+                'none';
+
+            pointLayer.innerHTML = '';
+
+            statusText.innerHTML =
+                'All strokes completed! 🎉';
+
+            statusText.className =
+                'status success';
+        }
+        //
+        // ========================================
+        // POINTER UP
+        // ========================================
+        //
+
+        function finishStroke() {
+
+            if (!drawing) {
+                return;
+            }
+
+            drawing = false;
+
+            //
+            // Extra anti-scribble validation
+            //
+
+            if (
+                invalidMovementCount > 25
+            ) {
+
+                resetCurrentStroke();
+
+                return;
+            }
+
+            //
+            // Must actually progress
+            //
+
+            if (
+                maxProgress <
+                COMPLETE_PROGRESS
+            ) {
+
+                resetCurrentStroke();
+
+                return;
+            }
+
+            const path =
+                getCurrentPath();
+
+            const totalLength =
+                path.getTotalLength();
+
+            const endPoint =
+                path.getPointAtLength(
+                    totalLength
+                );
+
+            const lastPoint =
+                userPoints[
+                userPoints.length - 1
+                ];
+
+            const nearEnd =
+                distance(
+                    lastPoint,
+                    endPoint
+                ) < END_RADIUS;
+
+            //
+            // SUCCESS
+            //
+
+            if (
+                nearEnd
+            ) {
+
+                completeStroke();
+
+            } else {
+
+                resetCurrentStroke();
+            }
+        }
+
+        canvas.addEventListener(
+            'pointerup',
+            finishStroke
+        );
+
+        canvas.addEventListener(
+            'pointercancel',
+            finishStroke
+        );
+
+        //
+        // ========================================
+        // RESET BUTTON
+        // ========================================
+        //
+
+        resetBtn.addEventListener(
+            'click',
+            () => {
+
+                currentStrokeIndex = 0;
+
+                strokes.forEach(stroke => {
+
+                    const guide =
+                        document.getElementById(
+                            stroke.pathId
+                        );
+
+                    guide.classList.remove(
+                        'completed-guide'
+                    );
+
+                    guide.classList.remove(
+                        'active-guide'
+                    );
+                });
+
+                getCurrentPath().classList.add(
+                    'active-guide'
+                );
+
+                dragHandle.style.display =
+                    'block';
+
+                renderPoints();
+
+                resetCurrentStroke();
+            }
+        );
+    </script>
+
+</body>
+
+</html>

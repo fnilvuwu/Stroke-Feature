@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Dynamic Buginese Stroke Tracing</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #f3f4f6;
+            padding: 24px;
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            width: 430px;
+            max-width: 100%;
+            background: white;
+            border-radius: 28px;
+            padding: 24px;
+            box-shadow:
+                0 15px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        h1 {
+            margin: 0;
+            text-align: center;
+            font-size: 32px;
+            color: #111827;
+        }
+
+        .description {
+            margin-top: 12px;
+            text-align: center;
+            color: #6b7280;
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            width: 360px;
+            height: 360px;
+            margin: 28px auto 0;
+            border-radius: 24px;
+            overflow: hidden;
+            background: white;
+            border: 2px solid #e5e7eb;
+        }
+
+        svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #drawLayer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            touch-action: none;
+            cursor: pointer;
+        }
+
+        .guide-path {
+            fill: none;
+            stroke: transparent;
+            stroke-width: 10;
+            pointer-events: none;
+        }
+
+        .active-guide {
+            opacity: 1;
+        }
+
+        .completed-guide {
+            stroke: #111827;
+            opacity: 1;
+            stroke-dasharray: none;
+        }
+
+        .character-fill {
+            fill: #111827;
+            stroke: none;
+            fill-rule: evenodd;
+        }
+
+        #backgroundLayer {
+            opacity: 0.18;
+        }
+
+        #completedLayer {
+            opacity: 1;
+        }
+
+        .trace-line {
+            fill: none;
+            stroke: #111827;
+            stroke-width: 24;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        #dragHandle {
+            pointer-events: none;
+        }
+
+        .handle-circle {
+            fill: #3b82f6;
+
+            filter:
+                drop-shadow(0 4px 10px rgba(59, 130, 246, 0.35));
+        }
+
+        .handle-arrow {
+            stroke: white;
+            stroke-width: 4;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .start-dot {
+            fill: #111827;
+        }
+
+        .mid-dot {
+            fill: #e5e7eb;
+            opacity: 0.9;
+        }
+
+        .end-dot {
+            fill: #3b82f6;
+        }
+
+        .controls {
+            margin-top: 22px;
+        }
+
+        button {
+            width: 100%;
+            border: none;
+            background: #111827;
+            color: white;
+            padding: 15px;
+            border-radius: 16px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        .status {
+            margin-top: 18px;
+            text-align: center;
+            font-weight: 700;
+            min-height: 24px;
+        }
+
+        .warning {
+            color: #dc2626;
+        }
+
+        .success {
+            color: #111827;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>Stroke Tracing</h1>
+
+        <div class="description">
+            Dynamic JSON-based tracing
+        </div>
+
+        <div class="canvas-wrapper">
+
+            <svg id="svgRoot" viewBox="0 0 360 360">
+
+                <!-- FILLED CHARACTER -->
+                <g id="backgroundLayer"></g>
+
+                <!-- COMPLETED FILLS -->
+                <g id="completedLayer"></g>
+
+                <!-- GENERATED GUIDE PATHS -->
+                <g id="guideLayer"></g>
+
+                <!-- COMPLETED STROKE -->
+                <path id="progressPath" class="trace-line" />
+
+                <!-- DOTS -->
+                <g id="pointLayer"></g>
+
+                <!-- BLUE ARROW -->
+                <g id="dragHandle">
+
+                    <circle r="18" class="handle-circle" />
+
+                    <path class="handle-arrow" d="M-4 -6 L5 0 L-4 6" />
+
+                </g>
+
+            </svg>
+
+            <canvas id="drawLayer" width="360" height="360"></canvas>
+
+        </div>
+
+        <div class="controls">
+
+            <button id="resetBtn">
+                Reset
+            </button>
+
+        </div>
+
+        <div class="status" id="status">
+            Loading character...
+        </div>
+
+    </div>
+
+    <script>
+
+        //
+        // ========================================
+        // CONFIG
+        // ========================================
+        //
+
+        const CANVAS_SIZE = 360;
+
+        const FLIP_Y = false;
+
+        const MAX_DISTANCE = 42;
+
+        const COMPLETE_PROGRESS = 0.92;
+
+        const START_RADIUS = 40;
+
+        const END_RADIUS = 48;
+
+        const SAMPLE_COUNT = 260;
+
+        const MAX_ALLOWED_BACKTRACK = 0.12;
+
+        const MIN_FORWARD_MOVEMENT = 0.002;
+
+        const MAX_SCRIBBLE_POINTS = 320;
+
+        const MAX_DIRECTION_CHANGES = 22;
+
+        //
+        // ========================================
+        // ELEMENTS
+        // ========================================
+        //
+
+        const canvas =
+            document.getElementById('drawLayer');
+
+        const ctx =
+            canvas.getContext('2d');
+
+        const progressPath =
+            document.getElementById('progressPath');
+
+        const dragHandle =
+            document.getElementById('dragHandle');
+
+        const pointLayer =
+            document.getElementById('pointLayer');
+
+        const backgroundLayer =
+            document.getElementById('backgroundLayer');
+
+        const completedLayer =
+            document.getElementById('completedLayer');
+
+        const guideLayer =
+            document.getElementById('guideLayer');
+
+        const statusText =
+            document.getElementById('status');
+
+        const resetBtn =
+            document.getElementById('resetBtn');
+
+        //
+        // ========================================
+        // STATE
+        // ========================================
+        //
+
+        let drawing = false;
+
+        let currentProgress = 0;
+
+        let maxProgress = 0;
+
+        let userPoints = [];
+
+        let strokeCompleted = false;
+
+        let directionChanges = 0;
+
+        let lastDelta = 0;
+
+        let invalidMovementCount = 0;
+
+        let currentStrokeIndex = 0;
+
+        let strokes = [];
+
+        let characterData = null;
+
+        //
+        // ========================================
+        // LOAD JSON
+        // ========================================
+        //
+
+        async function loadCharacter() {
+            try {
+
+                const response =
+                    await fetch('./output/ka/all.json');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                characterData =
+                    await response.json();
+
+                generateStrokeData();
+
+                initializeTracing();
+
+            } catch (error) {
+
+                statusText.innerHTML =
+                    'Failed to load character';
+
+                statusText.className =
+                    'status warning';
+            }
+        }
+
+        //
+        // ========================================
+        // SCALE HELPERS
+        // ========================================
+        //
+
+        function getScaleMetrics() {
+
+            const scale = Math.min(
+                CANVAS_SIZE / characterData.width,
+                CANVAS_SIZE / characterData.height
+            );
+
+            return {
+                scale,
+                offsetX:
+                    (CANVAS_SIZE - characterData.width * scale) / 2,
+                offsetY:
+                    (CANVAS_SIZE - characterData.height * scale) / 2
+            };
+        }
+
+        function getPathTransform() {
+
+            const metrics = getScaleMetrics();
+
+            if (FLIP_Y) {
+
+                const translateY =
+                    metrics.offsetY +
+                    (characterData.height * metrics.scale);
+
+                return `translate(${metrics.offsetX}, ${translateY}) scale(${metrics.scale}, ${-metrics.scale})`;
+            }
+
+            return `translate(${metrics.offsetX}, ${metrics.offsetY}) scale(${metrics.scale}, ${metrics.scale})`;
+        }
+
+        function scaleX(x) {
+
+            const metrics = getScaleMetrics();
+
+            return (x * metrics.scale) + metrics.offsetX;
+        }
+
+        function scaleY(y) {
+
+            const metrics = getScaleMetrics();
+
+            const scaled = FLIP_Y
+                ? (characterData.height * metrics.scale) - (y * metrics.scale)
+                : (y * metrics.scale);
+
+            return scaled + metrics.offsetY;
+        }
+
+        //
+        // ========================================
+        // SCALE SVG PATH
+        // ========================================
+        //
+
+        function scaleSvgPath(path) {
+
+            return path;
+        }
+
+        //
+        // ========================================
+        // MEDIAN TO SVG
+        // ========================================
+        //
+
+        function medianToSvgPath(points) {
+
+            if (!points.length) {
+                return '';
+            }
+
+            let d = '';
+
+            points.forEach((p, index) => {
+
+                const x = scaleX(p[0]);
+
+                const y = scaleY(p[1]);
+
+                if (index === 0) {
+
+                    d += `M ${x} ${y}`;
+
+                } else {
+
+                    d += ` L ${x} ${y}`;
+                }
+            });
+
+            return d;
+        }
+
+        //
+        // ========================================
+        // GENERATE STROKES
+        // ========================================
+        //
+
+        function generateStrokeData() {
+
+            strokes = [];
+
+            guideLayer.innerHTML = '';
+
+            backgroundLayer.innerHTML = '';
+
+            completedLayer.innerHTML = '';
+
+            characterData.strokes.forEach(
+                (strokePath, index) => {
+
+                    const median =
+                        characterData.medians[index];
+
+                    const visualPath =
+                        scaleSvgPath(strokePath);
+
+                    const logicPath =
+                        medianToSvgPath(median);
+
+                    //
+                    // CREATE FILLED BACKDROP
+                    //
+
+                    const fillPath =
+                        document.createElementNS(
+                            'http://www.w3.org/2000/svg',
+                            'path'
+                        );
+
+                    fillPath.setAttribute(
+                        'd',
+                        visualPath
+                    );
+
+                    fillPath.setAttribute(
+                        'transform',
+                        getPathTransform()
+                    );
+
+                    fillPath.setAttribute(
+                        'class',
+                        'character-fill'
+                    );
+
+                    backgroundLayer.appendChild(
+                        fillPath
+                    );
+
+                    //
+                    // CREATE GUIDE (MEDIAN)
+                    //
+
+                    const logicSvgPath =
+                        document.createElementNS(
+                            'http://www.w3.org/2000/svg',
+                            'path'
+                        );
+
+                    logicSvgPath.setAttribute(
+                        'd',
+                        logicPath
+                    );
+
+                    logicSvgPath.setAttribute(
+                        'fill',
+                        'none'
+                    );
+
+                    logicSvgPath.setAttribute(
+                        'stroke',
+                        'transparent'
+                    );
+
+                    logicSvgPath.id =
+                        `logic-${index}`;
+
+                    guideLayer.appendChild(
+                        logicSvgPath
+                    );
+
+                    //
+                    // CREATE GUIDE (MEDIAN)
+                    //
+
+                    const path =
+                        document.createElementNS(
+                            'http://www.w3.org/2000/svg',
+                            'path'
+                        );
+
+                    path.setAttribute(
+                        'd',
+                        logicPath
+                    );
+
+                    path.setAttribute(
+                        'class',
+                        `guide-path ${index === 0
+                            ? 'active-guide'
+                            : ''
+                        }`
+                    );
+
+                    requestAnimationFrame(() => {
+
+                        const guideLength =
+                            logicSvgPath.getTotalLength();
+
+                        const dotGap =
+                            Math.max(12, guideLength / 18);
+
+                    });
+
+                    path.id =
+                        `guide-${index}`;
+
+                    guideLayer.appendChild(path);
+
+                    //
+                    // START/END
+                    //
+
+                    const first =
+                        median[0];
+
+                    const last =
+                        median[
+                        median.length - 1
+                        ];
+
+                    strokes.push({
+
+                        guidePath: path,
+
+                        visualGuidePath: path,
+
+                        logicPath: logicSvgPath,
+
+                        fillPath,
+
+                        start: {
+                            x: scaleX(first[0]),
+                            y: scaleY(first[1])
+                        },
+
+                        end: {
+                            x: scaleX(last[0]),
+                            y: scaleY(last[1])
+                        }
+                    });
+                }
+            );
+        }
+
+        //
+        // ========================================
+        // HELPERS
+        // ========================================
+        //
+
+        function getCurrentStroke() {
+
+            return strokes[currentStrokeIndex];
+        }
+
+        function getCurrentPath() {
+
+            return getCurrentStroke().logicPath;
+        }
+
+        function distance(a, b) {
+
+            return Math.hypot(
+                a.x - b.x,
+                a.y - b.y
+            );
+        }
+
+        function getPointerPosition(event) {
+
+            const rect =
+                canvas.getBoundingClientRect();
+
+            return {
+
+                x:
+                    event.clientX - rect.left,
+
+                y:
+                    event.clientY - rect.top
+            };
+        }
+
+        //
+        // ========================================
+        // PROJECT TO PATH
+        // ========================================
+        //
+
+        function projectPointToPath(
+            path,
+            point
+        ) {
+
+            const totalLength =
+                path.getTotalLength();
+
+            let closestDistance =
+                Infinity;
+
+            let closestLength = 0;
+
+            for (
+                let i = 0;
+                i <= SAMPLE_COUNT;
+                i++
+            ) {
+
+                const length =
+                    (i / SAMPLE_COUNT) *
+                    totalLength;
+
+                const p =
+                    path.getPointAtLength(length);
+
+                const d =
+                    Math.hypot(
+                        point.x - p.x,
+                        point.y - p.y
+                    );
+
+                if (d < closestDistance) {
+
+                    closestDistance =
+                        d;
+
+                    closestLength =
+                        length;
+                }
+            }
+
+            return {
+
+                distance:
+                    closestDistance,
+
+                progress:
+                    closestLength /
+                    totalLength
+            };
+        }
+
+        //
+        // ========================================
+        // DRAW FREEHAND
+        // ========================================
+        //
+
+        function drawFreehandStroke() {
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            if (userPoints.length < 2) {
+                return;
+            }
+
+            ctx.strokeStyle =
+                '#111827';
+
+            ctx.lineWidth = 24;
+
+            ctx.lineCap = 'round';
+
+            ctx.lineJoin = 'round';
+
+            ctx.beginPath();
+
+            ctx.moveTo(
+                userPoints[0].x,
+                userPoints[0].y
+            );
+
+            for (
+                let i = 1;
+                i < userPoints.length - 1;
+                i++
+            ) {
+
+                const current =
+                    userPoints[i];
+
+                const next =
+                    userPoints[i + 1];
+
+                const midX =
+                    (current.x + next.x) / 2;
+
+                const midY =
+                    (current.y + next.y) / 2;
+
+                ctx.quadraticCurveTo(
+                    current.x,
+                    current.y,
+                    midX,
+                    midY
+                );
+            }
+
+            const last =
+                userPoints[
+                userPoints.length - 1
+                ];
+
+            ctx.lineTo(
+                last.x,
+                last.y
+            );
+
+            ctx.stroke();
+        }
+
+        //
+        // ========================================
+        // UPDATE VISUAL
+        // ========================================
+        //
+
+        function updateProgressVisual() {
+
+            const currentStroke =
+                getCurrentStroke();
+
+            const guide =
+                currentStroke.guidePath;
+
+            const logic =
+                currentStroke.logicPath;
+
+            if (strokeCompleted) {
+
+                const totalLength =
+                    logic.getTotalLength();
+
+                progressPath.setAttribute(
+                    'd',
+                    logic.getAttribute('d')
+                );
+
+                progressPath.style.strokeDasharray =
+                    totalLength;
+
+                progressPath.style.strokeDashoffset =
+                    0;
+
+            } else {
+
+                progressPath.setAttribute(
+                    'd',
+                    ''
+                );
+            }
+
+            //
+            // ARROW DIRECTION
+            //
+
+            const startPoint =
+                logic.getPointAtLength(0);
+
+            const nextPoint =
+                logic.getPointAtLength(10);
+
+            const angle =
+                Math.atan2(
+                    nextPoint.y - startPoint.y,
+                    nextPoint.x - startPoint.x
+                ) * (180 / Math.PI);
+
+            dragHandle.setAttribute(
+                'transform',
+                `
+                translate(${startPoint.x}, ${startPoint.y})
+                rotate(${angle})
+                `
+            );
+        }
+
+        //
+        // ========================================
+        // RENDER POINTS
+        // ========================================
+        //
+
+        function renderGuideDots() {
+
+            pointLayer.innerHTML = '';
+
+            const path =
+                getCurrentStroke().guidePath;
+
+            if (!path) {
+                return;
+            }
+
+            const totalLength =
+                path.getTotalLength();
+
+            if (!totalLength || totalLength <= 0) {
+                return;
+            }
+
+            const startPoint =
+                path.getPointAtLength(0);
+
+            const endPoint =
+                path.getPointAtLength(totalLength);
+
+            //
+            // CONSISTENT DOT SPACING
+            //
+
+            const DOT_SPACING = 32;
+
+            const midCount =
+                Math.max(
+                    1,
+                    Math.floor(totalLength / DOT_SPACING)
+                );
+
+            for (let i = 1; i < midCount; i++) {
+
+                const point =
+                    path.getPointAtLength(
+                        (i / midCount) * totalLength
+                    );
+
+                const midDot =
+                    document.createElementNS(
+                        'http://www.w3.org/2000/svg',
+                        'circle'
+                    );
+
+                midDot.setAttribute('cx', point.x);
+
+                midDot.setAttribute('cy', point.y);
+
+                midDot.setAttribute('r', 4);
+
+                midDot.setAttribute(
+                    'class',
+                    'mid-dot'
+                );
+
+                pointLayer.appendChild(midDot);
+            }
+
+            //
+            // START DOT
+            //
+
+            const startDot =
+                document.createElementNS(
+                    'http://www.w3.org/2000/svg',
+                    'circle'
+                );
+
+            startDot.setAttribute('cx', startPoint.x);
+
+            startDot.setAttribute('cy', startPoint.y);
+
+            startDot.setAttribute('r', 10);
+
+            startDot.setAttribute(
+                'class',
+                'start-dot'
+            );
+
+            //
+            // END DOT
+            //
+
+            const endDot =
+                document.createElementNS(
+                    'http://www.w3.org/2000/svg',
+                    'circle'
+                );
+
+            endDot.setAttribute('cx', endPoint.x);
+
+            endDot.setAttribute('cy', endPoint.y);
+
+            endDot.setAttribute('r', 7);
+
+            endDot.setAttribute(
+                'class',
+                'end-dot'
+            );
+
+            pointLayer.appendChild(startDot);
+
+            pointLayer.appendChild(endDot);
+        }
+
+        //
+        // ========================================
+        // RESET CURRENT
+        // ========================================
+        //
+
+        function resetCurrentStroke() {
+
+            drawing = false;
+
+            currentProgress = 0;
+
+            maxProgress = 0;
+
+            userPoints = [];
+
+            strokeCompleted = false;
+
+            directionChanges = 0;
+
+            lastDelta = 0;
+
+            invalidMovementCount = 0;
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            progressPath.setAttribute(
+                'd',
+                ''
+            );
+
+            updateProgressVisual();
+
+            statusText.innerHTML =
+                'Try again';
+
+            statusText.className =
+                'status warning';
+        }
+
+        //
+        // ========================================
+        // INIT
+        // ========================================
+        //
+
+        async function initializeTracing() {
+
+            //
+            // WAIT FOR SVG TO FINISH LAYOUT
+            //
+
+            await new Promise(resolve =>
+                requestAnimationFrame(() =>
+                    requestAnimationFrame(resolve)
+                )
+            );
+
+            //
+            // PREWARM SVG PATH GEOMETRY
+            //
+
+            strokes.forEach(stroke => {
+
+                const path = stroke.logicPath;
+
+                path.getTotalLength();
+
+                path.getPointAtLength(0);
+            });
+
+            //
+            // NOW RENDER UI
+            //
+
+            refreshCurrentStrokeUI();
+
+            statusText.innerHTML =
+                'Follow the blue arrow';
+
+            statusText.className =
+                'status';
+        }
+
+        function refreshCurrentStrokeUI() {
+
+            renderGuideDots();
+
+            updateProgressVisual();
+        }
+
+        //
+        // ========================================
+        // POINTER DOWN
+        // ========================================
+        //
+
+        canvas.addEventListener(
+            'pointerdown',
+            (event) => {
+
+                const pointer =
+                    getPointerPosition(event);
+
+                const start =
+                    getCurrentStroke().start;
+
+                if (
+                    distance(pointer, start)
+                    > START_RADIUS
+                ) {
+
+                    statusText.innerHTML =
+                        'Start from black dot';
+
+                    statusText.className =
+                        'status warning';
+
+                    return;
+                }
+
+                resetCurrentStroke();
+
+                drawing = true;
+
+                userPoints.push(pointer);
+
+                drawFreehandStroke();
+
+                statusText.innerHTML =
+                    'Tracing...';
+
+                statusText.className =
+                    'status';
+            }
+        );
+
+        //
+        // ========================================
+        // POINTER MOVE
+        // ========================================
+        //
+
+        canvas.addEventListener(
+            'pointermove',
+            (event) => {
+
+                if (!drawing) {
+                    return;
+                }
+
+                if (
+                    userPoints.length >
+                    MAX_SCRIBBLE_POINTS
+                ) {
+
+                    resetCurrentStroke();
+
+                    return;
+                }
+
+                const pointer =
+                    getPointerPosition(event);
+
+                userPoints.push(pointer);
+
+                drawFreehandStroke();
+
+                const path =
+                    getCurrentPath();
+
+                const projection =
+                    projectPointToPath(
+                        path,
+                        pointer
+                    );
+
+                if (
+                    projection.distance >
+                    MAX_DISTANCE
+                ) {
+
+                    invalidMovementCount++;
+
+                    return;
+                }
+
+                const delta =
+                    projection.progress -
+                    currentProgress;
+
+                if (
+                    delta <
+                    -MAX_ALLOWED_BACKTRACK
+                ) {
+
+                    invalidMovementCount++;
+
+                    return;
+                }
+
+                if (
+                    Math.sign(delta) !==
+                    Math.sign(lastDelta)
+                ) {
+
+                    directionChanges++;
+                }
+
+                lastDelta = delta;
+
+                if (
+                    directionChanges >
+                    MAX_DIRECTION_CHANGES
+                ) {
+
+                    resetCurrentStroke();
+
+                    return;
+                }
+
+                if (
+                    delta >
+                    MIN_FORWARD_MOVEMENT
+                ) {
+
+                    currentProgress =
+                        projection.progress;
+
+                    maxProgress =
+                        Math.max(
+                            maxProgress,
+                            currentProgress
+                        );
+                }
+            }
+        );
+
+        //
+        // ========================================
+        // COMPLETE STROKE
+        // ========================================
+        //
+
+        function completeStroke() {
+
+            strokeCompleted = true;
+
+            updateProgressVisual();
+
+            progressPath.setAttribute(
+                'd',
+                ''
+            );
+
+            progressPath.style.strokeDasharray =
+                '';
+
+            userPoints = [];
+
+            ctx.clearRect(
+                0,
+                0,
+                canvas.width,
+                canvas.height
+            );
+
+            const guide =
+                getCurrentStroke().guidePath;
+
+            const fill =
+                getCurrentStroke().fillPath;
+
+            guide.classList.remove(
+                'active-guide'
+            );
+
+            guide.classList.add(
+                'completed-guide'
+            );
+
+            guide.style.display =
+                'none';
+
+            completedLayer.appendChild(
+                fill
+            );
+
+            currentStrokeIndex++;
+
+            if (
+                currentStrokeIndex <
+                strokes.length
+            ) {
+
+                const nextGuide =
+                    getCurrentStroke().guidePath;
+
+                nextGuide.classList.add(
+                    'active-guide'
+                );
+
+                renderGuideDots();
+
+                resetCurrentStroke();
+
+                statusText.innerHTML =
+                    'Stroke complete! Next stroke';
+
+                statusText.className =
+                    'status success';
+
+                return;
+            }
+
+            dragHandle.style.display =
+                'none';
+
+            pointLayer.innerHTML = '';
+
+            statusText.innerHTML =
+                'All strokes completed! 🎉';
+
+            statusText.className =
+                'status success';
+        }
+
+        //
+        // ========================================
+        // POINTER UP
+        // ========================================
+        //
+
+        function finishStroke() {
+
+            if (!drawing) {
+                return;
+            }
+
+            drawing = false;
+
+            if (
+                invalidMovementCount > 25
+            ) {
+
+                resetCurrentStroke();
+
+                return;
+            }
+
+            if (
+                maxProgress <
+                COMPLETE_PROGRESS
+            ) {
+
+                resetCurrentStroke();
+
+                return;
+            }
+
+            const endPoint =
+                getCurrentStroke().end;
+
+            const lastPoint =
+                userPoints[
+                userPoints.length - 1
+                ];
+
+            const nearEnd =
+                distance(
+                    lastPoint,
+                    endPoint
+                ) < END_RADIUS;
+
+            if (nearEnd) {
+
+                completeStroke();
+
+            } else {
+
+                resetCurrentStroke();
+            }
+        }
+
+        canvas.addEventListener(
+            'pointerup',
+            finishStroke
+        );
+
+        canvas.addEventListener(
+            'pointercancel',
+            finishStroke
+        );
+
+        //
+        // ========================================
+        // RESET BUTTON
+        // ========================================
+        //
+
+        resetBtn.addEventListener(
+            'click',
+            () => {
+
+                currentStrokeIndex = 0;
+
+                strokes.forEach(stroke => {
+
+                    stroke.guidePath.classList.remove(
+                        'completed-guide'
+                    );
+
+                    stroke.guidePath.classList.remove(
+                        'active-guide'
+                    );
+
+                    backgroundLayer.appendChild(
+                        stroke.fillPath
+                    );
+                });
+
+                strokes[0].guidePath.classList.add(
+                    'active-guide'
+                );
+
+                dragHandle.style.display =
+                    'block';
+
+                refreshCurrentStrokeUI();
+
+                resetCurrentStroke();
+            }
+        );
+
+        //
+        // ========================================
+        // START
+        // ========================================
+        //
+
+        loadCharacter();
+
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>Duolingo Style Stroke Tracing</title>
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      background: #f3f4f6;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      width: 430px;
+      max-width: 100%;
+      background: white;
+      border-radius: 28px;
+      padding: 24px;
+      box-shadow:
+        0 15px 40px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      margin: 0;
+      text-align: center;
+      font-size: 32px;
+      color: #111827;
+    }
+
+    .description {
+      margin-top: 12px;
+      text-align: center;
+      color: #6b7280;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      width: 360px;
+      height: 360px;
+      margin: 28px auto 0;
+      border-radius: 24px;
+      overflow: hidden;
+      background: white;
+      border: 2px solid #e5e7eb;
+    }
+
+    svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #drawLayer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      z-index: 20;
+      cursor: pointer;
+    }
+
+    /* =====================================
+       GUIDE PATH
+    ===================================== */
+
+    .guide-path {
+      fill: none;
+      stroke: #d1d5db;
+      stroke-width: 24;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.18;
+      transition: all 0.25s ease;
+    }
+
+    .active-guide {
+      stroke: #111827;
+      opacity: 0.18;
+    }
+
+    .completed-guide {
+      stroke: #111827;
+      opacity: 1;
+    }
+
+    /* =====================================
+       USER PROGRESS
+    ===================================== */
+
+    .trace-line {
+      fill: none;
+      stroke: #111827;
+      stroke-width: 24;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* =====================================
+       HANDLE
+    ===================================== */
+
+    #dragHandle {
+      pointer-events: none;
+      transition:
+        transform 0.05s linear;
+    }
+
+    .handle-circle {
+      fill: #3b82f6;
+      filter:
+        drop-shadow(
+          0 4px 10px rgba(59,130,246,0.35)
+        );
+    }
+
+    .handle-arrow {
+      stroke: white;
+      stroke-width: 4;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* =====================================
+       POINTS
+    ===================================== */
+
+    .start-dot {
+      fill: #111827;
+    }
+
+    .end-dot {
+      fill: #9ca3af;
+    }
+
+    /* =====================================
+       BUTTON
+    ===================================== */
+
+    .controls {
+      margin-top: 22px;
+    }
+
+    button {
+      width: 100%;
+      border: none;
+      background: #111827;
+      color: white;
+      padding: 15px;
+      border-radius: 16px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      opacity: 0.94;
+    }
+
+    /* =====================================
+       STATUS
+    ===================================== */
+
+    .status {
+      margin-top: 18px;
+      text-align: center;
+      font-weight: 700;
+      color: #111827;
+      min-height: 24px;
+    }
+
+    .warning {
+      color: #dc2626;
+    }
+
+    .success {
+      color: #111827;
+    }
+
+    /* =====================================
+       INFO
+    ===================================== */
+
+    .info-box {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 16px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      color: #374151;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <h1>Stroke Tracing</h1>
+
+  <div class="description">
+    Drag the blue handle and follow the stroke
+  </div>
+
+  <div class="canvas-wrapper">
+
+    <svg viewBox="0 0 360 360">
+
+      <!-- FILTERS -->
+      <defs>
+
+        <filter id="shadow">
+          <feDropShadow
+            dx="0"
+            dy="2"
+            stdDeviation="3"
+            flood-opacity="0.25"
+          />
+        </filter>
+
+      </defs>
+
+      <!-- GUIDE 1 -->
+      <path
+        id="guide1"
+        class="guide-path active-guide"
+        d="M80 180 Q180 80 280 180"
+      />
+
+      <!-- GUIDE 2 -->
+      <path
+        id="guide2"
+        class="guide-path"
+        d="M180 180 L180 280"
+      />
+
+      <!-- POINTS -->
+      <g id="pointLayer"></g>
+
+      <!-- USER PROGRESS -->
+      <path
+        id="progressPath"
+        class="trace-line"
+      />
+
+      <!-- HANDLE -->
+      <g id="dragHandle">
+
+        <circle
+          r="18"
+          class="handle-circle"
+        />
+
+        <path
+          class="handle-arrow"
+          d="M-4 -6 L5 0 L-4 6"
+        />
+
+      </g>
+
+    </svg>
+
+    <canvas
+      id="drawLayer"
+      width="360"
+      height="360"
+    ></canvas>
+
+  </div>
+
+  <div class="controls">
+    <button id="resetBtn">
+      Reset
+    </button>
+  </div>
+
+  <div
+    class="status"
+    id="status"
+  >
+    Follow the blue handle
+  </div>
+
+  <div class="info-box">
+    ✔ Smooth Duolingo-style tracing
+    <br>
+    ✔ No messy lines
+    <br>
+    ✔ Locked to path
+    <br>
+    ✔ Stable arrow direction
+  </div>
+
+</div>
+
+<script>
+
+  // =====================================
+  // STROKES
+  // =====================================
+
+  const strokes = [
+    {
+      pathId: 'guide1',
+      start: { x: 80, y: 180 },
+      checkpoints: []
+    },
+    {
+      pathId: 'guide2',
+      start: { x: 180, y: 180 },
+      checkpoints: []
+    }
+  ];
+
+  // =====================================
+  // ELEMENTS
+  // =====================================
+
+  const canvas =
+    document.getElementById(
+      'drawLayer'
+    );
+
+  const statusText =
+    document.getElementById(
+      'status'
+    );
+
+  const progressPath =
+    document.getElementById(
+      'progressPath'
+    );
+
+  const dragHandle =
+    document.getElementById(
+      'dragHandle'
+    );
+
+  const pointLayer =
+    document.getElementById(
+      'pointLayer'
+    );
+
+  const resetBtn =
+    document.getElementById(
+      'resetBtn'
+    );
+
+  // =====================================
+  // STATE
+  // =====================================
+
+  let currentStrokeIndex = 0;
+  let currentCheckpointIndex = 0;
+  let currentProgress = 0;
+  let drawing = false;
+
+  // =====================================
+  // GENERATE CHECKPOINTS
+  // =====================================
+
+  function generateCheckpoints(
+    pathElement,
+    total = 80
+  ) {
+
+    const length =
+      pathElement.getTotalLength();
+
+    const points = [];
+
+    for (let i = 0; i <= total; i++) {
+
+      const point =
+        pathElement.getPointAtLength(
+          (i / total) * length
+        );
+
+      points.push({
+        x: point.x,
+        y: point.y
+      });
+    }
+
+    return points;
+  }
+
+  // =====================================
+  // RENDER POINTS
+  // =====================================
+
+  function renderPoints() {
+
+    pointLayer.innerHTML = '';
+
+    const currentStroke =
+      strokes[currentStrokeIndex];
+
+    if (!currentStroke) {
+      return;
+    }
+
+    const checkpoints =
+      currentStroke.checkpoints;
+
+    const start =
+      checkpoints[0];
+
+    const end =
+      checkpoints[
+        checkpoints.length - 1
+      ];
+
+    // START DOT
+    const startDot =
+      document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'circle'
+      );
+
+    startDot.setAttribute(
+      'cx',
+      start.x
+    );
+
+    startDot.setAttribute(
+      'cy',
+      start.y
+    );
+
+    startDot.setAttribute(
+      'r',
+      10
+    );
+
+    startDot.setAttribute(
+      'class',
+      'start-dot'
+    );
+
+    // END DOT
+    const endDot =
+      document.createElementNS(
+        'http://www.w3.org/2000/svg',
+        'circle'
+      );
+
+    endDot.setAttribute(
+      'cx',
+      end.x
+    );
+
+    endDot.setAttribute(
+      'cy',
+      end.y
+    );
+
+    endDot.setAttribute(
+      'r',
+      7
+    );
+
+    endDot.setAttribute(
+      'class',
+      'end-dot'
+    );
+
+    pointLayer.appendChild(startDot);
+    pointLayer.appendChild(endDot);
+  }
+
+  // =====================================
+  // UPDATE PROGRESS
+  // =====================================
+
+  function updateProgressPath() {
+
+    const currentStroke =
+      strokes[currentStrokeIndex];
+
+    if (!currentStroke) {
+      return;
+    }
+
+    const path =
+      document.getElementById(
+        currentStroke.pathId
+      );
+
+    const totalLength =
+      path.getTotalLength();
+
+    const drawLength =
+      totalLength * currentProgress;
+
+    progressPath.setAttribute(
+      'd',
+      path.getAttribute('d')
+    );
+
+    progressPath.style.strokeDasharray =
+      totalLength;
+
+    progressPath.style.strokeDashoffset =
+      totalLength - drawLength;
+
+    // CURRENT POINT
+    const point =
+      path.getPointAtLength(
+        drawLength
+      );
+
+    // FIXED END ROTATION
+    const safeNextLength =
+      drawLength >= totalLength - 2
+        ? drawLength - 2
+        : drawLength + 2;
+
+    const nextPoint =
+      path.getPointAtLength(
+        safeNextLength
+      );
+
+    const angle =
+      Math.atan2(
+        nextPoint.y - point.y,
+        nextPoint.x - point.x
+      ) * (180 / Math.PI);
+
+    const correctedAngle =
+      drawLength >= totalLength - 2
+        ? angle + 180
+        : angle;
+
+    dragHandle.setAttribute(
+      'transform',
+      `
+        translate(${point.x}, ${point.y})
+        rotate(${correctedAngle})
+      `
+    );
+  }
+
+  // =====================================
+  // INITIALIZE
+  // =====================================
+
+  function initialize() {
+
+    strokes.forEach((stroke) => {
+
+      const path =
+        document.getElementById(
+          stroke.pathId
+        );
+
+      stroke.checkpoints =
+        generateCheckpoints(path);
+    });
+
+    renderPoints();
+    updateProgressPath();
+  }
+
+  initialize();
+
+  // =====================================
+  // HELPERS
+  // =====================================
+
+  function distance(a, b) {
+
+    return Math.hypot(
+      a.x - b.x,
+      a.y - b.y
+    );
+  }
+
+  function getPointerPosition(event) {
+
+    const rect =
+      canvas.getBoundingClientRect();
+
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  }
+
+  // =====================================
+  // POINTER DOWN
+  // =====================================
+
+  canvas.addEventListener(
+    'pointerdown',
+    (event) => {
+
+      const currentStroke =
+        strokes[currentStrokeIndex];
+
+      if (!currentStroke) {
+        return;
+      }
+
+      const pointer =
+        getPointerPosition(event);
+
+      if (
+        distance(
+          pointer,
+          currentStroke.start
+        ) > 40
+      ) {
+
+        statusText.innerHTML =
+          'Start from the black dot';
+
+        statusText.className =
+          'status warning';
+
+        return;
+      }
+
+      drawing = true;
+
+      currentCheckpointIndex = 0;
+      currentProgress = 0;
+
+      updateProgressPath();
+
+      statusText.innerHTML =
+        'Tracing...';
+
+      statusText.className =
+        'status';
+    }
+  );
+
+  // =====================================
+  // POINTER MOVE
+  // =====================================
+
+  canvas.addEventListener(
+    'pointermove',
+    (event) => {
+
+      if (!drawing) {
+        return;
+      }
+
+      const currentStroke =
+        strokes[currentStrokeIndex];
+
+      if (!currentStroke) {
+        return;
+      }
+
+      const checkpoints =
+        currentStroke.checkpoints;
+
+      const pointer =
+        getPointerPosition(event);
+
+      let closestIndex = 0;
+      let closestDistance =
+        Infinity;
+
+      checkpoints.forEach(
+        (point, index) => {
+
+          const dist =
+            distance(pointer, point);
+
+          if (dist < closestDistance) {
+
+            closestDistance = dist;
+            closestIndex = index;
+          }
+        }
+      );
+
+      // prevent backward
+      if (
+        closestIndex <
+        currentCheckpointIndex
+      ) {
+        return;
+      }
+
+      currentCheckpointIndex =
+        closestIndex;
+
+      currentProgress =
+        closestIndex /
+        (checkpoints.length - 1);
+
+      updateProgressPath();
+    }
+  );
+
+  // =====================================
+  // FINISH STROKE
+  // =====================================
+
+  function finishStroke() {
+
+    if (!drawing) {
+      return;
+    }
+
+    drawing = false;
+
+    const currentStroke =
+      strokes[currentStrokeIndex];
+
+    if (!currentStroke) {
+      return;
+    }
+
+    const checkpoints =
+      currentStroke.checkpoints;
+
+    const completed =
+      currentCheckpointIndex >=
+      checkpoints.length - 4;
+
+    if (completed) {
+
+      currentProgress = 1;
+
+      updateProgressPath();
+
+      const currentGuide =
+        document.getElementById(
+          currentStroke.pathId
+        );
+
+      currentGuide.classList.remove(
+        'active-guide'
+      );
+
+      currentGuide.classList.add(
+        'completed-guide'
+      );
+
+      statusText.innerHTML =
+        `Stroke ${
+          currentStrokeIndex + 1
+        } completed`;
+
+      statusText.className =
+        'status success';
+
+      currentStrokeIndex++;
+
+      // NEXT STROKE
+      if (
+        currentStrokeIndex <
+        strokes.length
+      ) {
+
+        setTimeout(() => {
+
+          progressPath.setAttribute(
+            'd',
+            ''
+          );
+
+          currentCheckpointIndex = 0;
+          currentProgress = 0;
+
+          const nextGuide =
+            document.getElementById(
+              strokes[
+                currentStrokeIndex
+              ].pathId
+            );
+
+          nextGuide.classList.add(
+            'active-guide'
+          );
+
+          renderPoints();
+          updateProgressPath();
+
+          statusText.innerHTML =
+            'Follow the blue handle';
+
+          statusText.className =
+            'status';
+
+        }, 500);
+
+      } else {
+
+        dragHandle.style.display =
+          'none';
+
+        pointLayer.innerHTML = '';
+
+        statusText.innerHTML =
+          'Character completed! 🎉';
+
+        statusText.className =
+          'status success';
+      }
+
+    } else {
+
+      statusText.innerHTML =
+        'Stroke incomplete';
+
+      statusText.className =
+        'status warning';
+
+      setTimeout(() => {
+
+        currentCheckpointIndex = 0;
+        currentProgress = 0;
+
+        updateProgressPath();
+
+      }, 400);
+    }
+  }
+
+  canvas.addEventListener(
+    'pointerup',
+    finishStroke
+  );
+
+  canvas.addEventListener(
+    'pointercancel',
+    finishStroke
+  );
+
+  canvas.addEventListener(
+    'pointerleave',
+    finishStroke
+  );
+
+  // =====================================
+  // RESET
+  // =====================================
+
+  resetBtn.addEventListener(
+    'click',
+    () => {
+
+      currentStrokeIndex = 0;
+      currentCheckpointIndex = 0;
+      currentProgress = 0;
+      drawing = false;
+
+      progressPath.setAttribute(
+        'd',
+        ''
+      );
+
+      dragHandle.style.display =
+        'block';
+
+      document
+        .querySelectorAll('.guide-path')
+        .forEach((path) => {
+
+          path.classList.remove(
+            'active-guide'
+          );
+
+          path.classList.remove(
+            'completed-guide'
+          );
+        });
+
+      document
+        .getElementById(
+          strokes[0].pathId
+        )
+        .classList.add(
+          'active-guide'
+        );
+
+      renderPoints();
+      updateProgressPath();
+
+      statusText.innerHTML =
+        'Follow the blue handle';
+
+      statusText.className =
+        'status';
+    }
+  );
+
+</script>
+
+</body>
+</html>

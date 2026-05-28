@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buginese Writer</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/hanzi-writer@3.5/dist/hanzi-writer.min.js"></script>
+
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #f5f5f5;
+      margin: 0;
+    }
+
+    .writer-wrapper {
+      position: relative;
+      width: 300px;
+      height: 300px;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    #grid-background-target {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    #writer-target {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+
+      /* FLIP VERTICALLY */
+      transform: scaleY(-1);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="writer-wrapper">
+
+    <!-- Background Grid -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" id="grid-background-target"
+      preserveAspectRatio="none">
+
+      <line x1="0" y1="0" x2="100" y2="100" stroke="#DDD" />
+      <line x1="100" y1="0" x2="0" y2="100" stroke="#DDD" />
+      <line x1="50" y1="0" x2="50" y2="100" stroke="#DDD" />
+      <line x1="0" y1="50" x2="100" y2="50" stroke="#DDD" />
+
+    </svg>
+
+    <!-- Hanzi Writer Target -->
+    <div id="writer-target"></div>
+
+  </div>
+
+  <script>
+    const writer = HanziWriter.create('writer-target', 'ᨁ', {
+      width: 300,
+      height: 300,
+
+      showOutline: true,
+      showCharacter: false,
+
+      strokeAnimationSpeed: 1,
+
+      charDataLoader: async () => {
+        const response = await fetch('./1a01.json');
+        return response.json();
+      }
+    });
+
+    writer.animateCharacter();
+  </script>
+
+</body>
+
+</html>
