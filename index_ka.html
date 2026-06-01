@@ -41,6 +41,8 @@
       inset: 0;
       z-index: 1;
 
+      /* FLIP VERTICALLY */
+      transform: scaleY(-1);
     }
   </style>
 </head>
@@ -66,7 +68,7 @@
   </div>
 
   <script>
-    const writer = HanziWriter.create('writer-target', 'ᨀ', {
+    const writer = HanziWriter.create('writer-target', 'ᨁ', {
       width: 300,
       height: 300,
 
